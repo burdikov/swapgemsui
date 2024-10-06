@@ -1,215 +1,294 @@
-import './App.css';
-
 import '@telegram-apps/telegram-ui/dist/styles.css';
 
-import {AppRoot, Button, Cell, Input, List, Section, Switch, Tappable, Textarea} from '@telegram-apps/telegram-ui';
-import React, {useState} from "react";
-import StatedButton from "./StatedButton";
-import LabeledSegmentedControl from "./LabeledSegmentedControl";
-import CurrencySelect from "./CurrencySelect";
-import {Icon24Close} from "@telegram-apps/telegram-ui/dist/icons/24/close";
+import {AppRoot, Button, Cell, IconButton, Input, List, Section, Textarea, Tooltip} from '@telegram-apps/telegram-ui';
+import React, {useEffect, useState} from "react";
+import CurrencySection from "./CurrencySection";
+import MethodsSection from "./MethodsSection";
+import HeaderSection from "./HeaderSection";
+import MoneySection from "./MoneySection";
+import {BUY, EUR, RUB, SELL} from "./const";
+import {figureOutColors} from "./utils";
+import RateSection from "./RateSection";
+import HapticSwitch from "./Haptics";
+import {editId, keeping, state} from "./index";
+import {Icon20QuestionMark} from "@telegram-apps/telegram-ui/dist/icons/20/question_mark";
+
+function form1OnSubmit(editId, keeping, fields) {
+    return (event) => {
+        event.preventDefault()
+        let form = event.target;
+        if (form.checkValidity()) {
+            let msg =
+                `${editId ? 'Редактировать' : 'Опубликовать'} объявление о ${
+                    fields.buyOrSell === SELL ?
+                        `продаже ${fields.sum} ${fields.sellingCurr}?` :
+                        `покупке ${fields.sum} ${fields.buyingCurr}?`}`
+            if (!window.confirm(msg)) {
+                return;
+            }
+        } else {
+            form.reportValidity();
+        }
+        window.Telegram.WebApp.MainButton.showProgress()
+
+        const payload = JSON.stringify(fields)
+
+        let params = {}
+        if (editId) {
+            params.edit_id = editId
+        }
+        if (fields.reportId) {
+            params.report_id = fields.reportId
+        }
+
+        params.keeping = keeping;
+
+        fetch(event.target.action + '?' + new URLSearchParams(params).toString(),
+            {
+                method: 'POST',
+                contentType: 'application/json',
+                body: payload,
+                headers: {
+                    'X-Telegram-Init-Data': window.Telegram.WebApp.initData,
+                }
+            }).then(
+            async (response) => {
+                let text = await response.text();
+
+                window.Telegram.WebApp.MainButton.hideProgress()
+
+                if (!response.ok) {
+                    throw new Error(`${response.status}: ${text}`);
+                }
+
+                if (!keeping) return;
+
+                const [msgId, reportId] = text.split(',')
+
+                // alert(`msgId=${msgId}, reportId=${reportId}`)
+
+                fields.reportId = reportId;
+                let state = JSON.stringify(fields);
+                window.Telegram.WebApp.CloudStorage.setItem(msgId, state, (err, value) => {
+                    alert(`err=${err.message()}, value=${value}`);
+                });
+
+                if (!editId) {
+                    window.Telegram.WebApp.CloudStorage.setItem('latest', state);
+                }
+            }).then(() => {
+            window.Telegram.WebApp.close()
+        }).catch((error) => {
+            window.Telegram.WebApp.MainButton.hideProgress()
+            alert(error.message); // todo friendly error msg
+        });
+    }
+}
 
 export default function App() {
-    const euButtonNames = [['Bizum', 'Revolut', 'IBAN', 'Wise']]
+    let botDomain = 'https://swapgems.io'
 
-    const ruButtons = [['Сбер', 'Tinkoff', 'Raif', 'СБП']]
-    const quickMoneys = [2000, 1000, 500, 200]
+    const [settings, setSettings] = useState(false)
 
-    let appDomain = ''
-    const [ourMonInpVal, setOurMonInpVal] = useState('');
+    let [keep, setKeep] = useState(keeping)
+
+    const [fields, setFields] = useState(state ?? {
+        buyOrSell: SELL,
+        sellingCurr: EUR,
+        buyingCurr: RUB,
+        sum: '',
+        inParts: false,
+        cb: true,
+        rate: '',
+        euMethods: [],
+        euMore: false,
+        euMethodsStr: '',
+        ruMethods: [],
+        ruMore: false,
+        ruMethodsStr: '',
+        comment: '',
+        cash: false,
+        cashOnly: false,
+        location: '',
+        reportId: null,
+    });
+
+    useEffect(() => {
+        window.Telegram.WebApp.MainButton
+            .setText(editId ? 'Редактировать' : 'Опубликовать')
+            .onClick(function () {
+                let form = document.forms['form1']
+                form.requestSubmit()
+            })
+            .setParams({
+                is_visible: true,
+                has_shine_effect: false,
+            });
+
+        window.Telegram.WebApp.SettingsButton
+            .onClick(function () {
+                setSettings(true)
+            })
+            .show();
+
+        window.Telegram.WebApp.ready()
+    }, [])
+
+
+    let selling = fields.buyOrSell === SELL;
+
     return (
-        <AppRoot style={{background: 'var(--tgui--secondary_bg_color)'}}>
-            <div>
-                <form id={'form1'}
-                      action={`https://${appDomain}/bot/form`}
-                      method={'POST'}
-                      onSubmit={event => {
-                          event.preventDefault()
-                          fetch(event.target.action, {
-                              method: 'POST',
-                              body: new URLSearchParams(new FormData(event.target))
-                          }).then((response) => {
-                              window.Telegram.WebApp.MainButton.hideProgress()
-                              if (!response.ok) {
-                                  throw new Error(`HTTP error! Status: ${response.status}`);
-                              }
-                              return response.text();
-                          }).then((body) => {
-                              window.Telegram.WebApp.switchInlineQuery(body)
-                          }).catch((error) => {
-                              // TODO handle error
-                          });
-                      }
-                      }
-                >
-                    <List>
-                        <Section id={'our-money'}>
-                            <LabeledSegmentedControl
-                                labels={[{label: 'Продам', value: 'sell'}, {label: 'Куплю', value: 'buy'}]}
-                                required={true} name={'buy-or-sell'}
-                            >
-                            </LabeledSegmentedControl>
-                            <div style={{display: 'grid', gridTemplateColumns: '3fr 2fr'}}>
-                                <Input id={'our-money-inp'} placeholder={'сумма'} inputMode={'decimal'}
-                                       value={ourMonInpVal}
-                                       style={{fontWeight: "bold"}}
-                                       name={'our-sum'}
-                                       onChange={(e) => {
-                                           setOurMonInpVal(e.target.value)
-                                       }}
-                                       after={
-                                           <Tappable Component="div" style={{display: 'flex'}}
-                                                     onClick={() => setOurMonInpVal('')}>
-                                               <Icon24Close/>
-                                           </Tappable>
-                                       }
-                                />
-                                <CurrencySelect name={'our-curr'} spanClass={'top-curr'}/>
-                            </div>
+        <AppRoot style={figureOutColors()}>
+            {settings ?
+                <List>
+                    <Section>
+                        <Cell after={<HapticSwitch
+                            checked={keep}
+                            onChange={(e) => {
+                                e.target.active = false;
+                                keep = !keep
+                                window.Telegram.WebApp.CloudStorage.setItem('keeping', keep ? 'yes' : 'no',
+                                    (err) => {
+                                        if (!err) setKeep(keep)
+                                        e.target.active = true;
+                                    })
+                            }}/>} Component={'label'}
+                        before={<IconButton mode="plain" size="s"
+                        ><Icon20QuestionMark/></IconButton>}>
+                            Запоминать данные форм
+                        </Cell>
+                    </Section>
+                    <Button
+                        stretched={true}
+                        type={'button'}
+                        onClick={() => setSettings(false)}>
+                        Закрыть
+                    </Button>
+                </List> :
+                <div>
+                    <form id={'form1'}
+                          action={`${botDomain}/bot/form`}
+                          method={'POST'}
+                          onSubmit={form1OnSubmit(editId, keep, fields)}
+                    >
+                        <List>
+                            <HeaderSection
+                                labels={[SELL, BUY]}
+                                current={fields.buyOrSell}
+                                onClick={(verb) => setFields({...fields, buyOrSell: verb})}
+                            />
 
-                            {!ourMonInpVal ?
-                                <div id={'quick-moneys-btns'} style={{display: 'flex', gap: '8px'}}>
-                                    {quickMoneys.map(sum => (
-                                        <Button size={'s'} mode={'plain'} value={sum} stretched
-                                                onClick={function (e) {
-                                                    setOurMonInpVal(e.target.closest('button').value)
-                                                }}
-                                        >
-                                            {sum}
-                                        </Button>
-                                    ))}
-                                </div> : ''}
+                            <CurrencySection
+                                buyingCurr={fields.buyingCurr}
+                                sellingCurr={fields.sellingCurr}
+                                setCurrencies={(selling, buying) => setFields({
+                                    ...fields,
+                                    sellingCurr: selling,
+                                    buyingCurr: buying
+                                })}
+                            />
 
-                            <label style={{display: 'grid', gridTemplateColumns: '3fr 2fr'}}>
-                                <Cell>За</Cell>
+                            <MoneySection
+                                selling={selling}
+                                sellingCurr={fields.sellingCurr}
+                                buyingCurr={fields.buyingCurr}
+                                sum={fields.sum}
+                                setSum={(sum) => setFields({...fields, sum})}
+                                setInParts={(inParts) => setFields({...fields, inParts})}
+                            />
 
-                                <CurrencySelect id={'bot-cur-sel'} spanClass={'bot-curr'} selectedValue={'RUB'}
-                                                f name={'their-curr'}/>
-                            </label>
+                            <RateSection
+                                cb={fields.cb}
+                                setCb={(cb) => setFields({...fields, cb})}
+                                rate={fields.rate}
+                                setRate={(rate) => setFields({...fields, rate})}
+                            />
 
-                            <Cell
-                                Component="label"
-                                after={<Switch
-                                    name={'cb'}
-                                    defaultChecked
-                                    onChange={() => {
-                                        window.Telegram.WebApp.HapticFeedback.selectionChanged()
-                                        let x = document.getElementById('their-money')
-                                        if (x.style.display === 'block') {
-                                            x.style.display = 'none'
-                                        } else {
-                                            x.style.display = 'block'
-                                        }
-                                    }}
+                            <Section header={'Опции'}>
+                                <Cell Component="label"
+                                      after={<HapticSwitch checked={fields.inParts}
+                                                           onChange={() => setFields({
+                                                               ...fields,
+                                                               inParts: !fields.inParts
+                                                           })}/>}>
+                                    Можно частями
+                                </Cell>
+                                <Cell Component="label"
+                                      after={<HapticSwitch checked={fields.cash}
+                                                           onChange={() => {
+                                                               if (fields.cash) {
+                                                                   fields.cashOnly = false;
+                                                               }
+                                                               setFields({
+                                                                   ...fields,
+                                                                   cash: !fields.cash,
+                                                                   cashOnly: fields.cashOnly,
+                                                               })
+                                                           }}/>}>
+                                    Наличными
+                                </Cell>
+                                {fields.cash && <Cell Component="label"
+                                                      after={<HapticSwitch checked={fields.cashOnly}
+                                                                           onChange={() => setFields({
+                                                                               ...fields,
+                                                                               cashOnly: !fields.cashOnly
+                                                                           })}/>}>
+                                    И только наличными
+                                </Cell>}
+                            </Section>
+
+                            {fields.cash &&
+                                <Section header={'Передача наличных'}>
+                                    <Input placeholder={'локация'} required={true} maxLength={40}
+                                           value={fields.location} onChange={e => setFields({
+                                        ...fields,
+                                        location: e.target.value
+                                    })}
+                                           title={'Максимум 40 символов.'}/>
+                                </Section>
+                            }
+
+                            {!fields.cashOnly && <MethodsSection header={'Отправка валюты'}
+                                                                 methods={['Bizum', 'Revolut', 'IBAN', 'Wise']}
+                                                                 selectedMethods={fields.euMethods}
+                                                                 setSelectedMethods={(euMethods) => setFields({
+                                                                     ...fields,
+                                                                     euMethods
+                                                                 })}
+                                                                 more={fields.euMore}
+                                                                 setMore={(more) => setFields({
+                                                                     ...fields,
+                                                                     euMore: more
+                                                                 })}
+                                                                 moreVal={fields.euMethodsStr}
+                                                                 setMoreVal={(val) => setFields({
+                                                                     ...fields,
+                                                                     euMethodsStr: val
+                                                                 })}
+                            />}
+
+                            {!fields.cashOnly && (fields.sellingCurr === RUB || fields.buyingCurr === RUB) &&
+                                <MethodsSection header={'Отправка рублей'}
+                                                methods={['Сбер', 'Tinkoff', 'Raif', 'СБП']}
+                                                selectedMethods={fields.ruMethods}
+                                                setSelectedMethods={(ruMethods) => setFields({
+                                                    ...fields,
+                                                    ruMethods
+                                                })}
+                                                more={fields.ruMore}
+                                                setMore={(more) => setFields({...fields, ruMore: more})}
+                                                moreVal={fields.ruMethodsStr}
+                                                setMoreVal={(val) => setFields({...fields, ruMethodsStr: val})}
                                 />}
-                            >
-                                По ЦБ
-                            </Cell>
 
-
-                        </Section>
-                        <Section
-                            id={'their-money'}
-                            style={{display: 'none'}}
-                        >
-                            <LabeledSegmentedControl
-                                name={'sum-or-rate'}
-                                labels={[
-                                    {
-                                        label: 'За сумму', value: 'sum',
-                                        f: () => {
-                                            document.getElementById('rate-row').style.display = 'none'
-                                            document.getElementById('sum-row').style.display = 'grid'
-                                        }
-                                    }, {
-                                        label: 'По курсу', value: 'rate',
-                                        f: () => {
-                                            document.getElementById('sum-row').style.display = 'none'
-                                            document.getElementById('rate-row').style.display = 'grid'
-                                        }
-                                    }]}
-                            >
-                            </LabeledSegmentedControl>
-
-                            <label id={'rate-row'} style={{display: 'none', gridTemplateColumns: '3fr 2fr'}}>
-                                <Input placeholder={'курс'} style={{fontWeight: "bold"}} inputMode={'decimal'}
-                                       name={'rate'}/>
-                                <Cell><span className={'bot-curr'}>RUB</span> / <span
-                                    className={'top-curr'}>EUR</span></Cell>
-                            </label>
-                            <label id={'sum-row'} style={{display: 'grid', gridTemplateColumns: '3fr 2fr'}}>
-                                <Input name={'their-sum'} placeholder={'сумма'} style={{fontWeight: "bold"}}
-                                       inputMode={'decimal'}/>
-                                <Cell className={'bot-curr'}>RUB</Cell>
-                            </label>
-                        </Section>
-
-                        <div style={{display: 'flex', gap: 8}}>{
-                            euButtonNames.map(row => (
-                                row.map(name => (
-                                    <StatedButton size={'s'} formName={'eu-methods'} formValue={name}>
-                                        {name}
-                                    </StatedButton>))
-                            ))}
-                            <StatedButton size={'s'} f={() => {
-                                let el = document.getElementById('eu-other-div')
-                                if (el.style.display === 'none') {
-                                    el.style.display = 'grid'
-                                } else {
-                                    el.style.display = 'none'
-                                }
-                            }}>...</StatedButton>
-                        </div>
-                        <div id={'eu-other-div'} style={{display: 'none', gridTemplateColumns: '1fr'}}>
-                            <Input name={'eu-methods-str'} placeholder={'через запятую'} maxLength={40}/>
-                        </div>
-
-                        <div style={{display: 'flex', gap: 8}}>
-                            {ruButtons.map(row => (
-                                row.map(name => (
-                                    <StatedButton size={'s'} formName={'ru-methods'} formValue={name}>
-                                        {name}
-                                    </StatedButton>))
-                            ))}
-                            <StatedButton size={'s'} f={() => {
-                                let el = document.getElementById('ru-other-div')
-                                if (el.style.display === 'none') {
-                                    el.style.display = 'grid'
-                                } else {
-                                    el.style.display = 'none'
-                                }
-                            }}>...</StatedButton>
-                        </div>
-                        <div id={'ru-other-div'} style={{display: 'none', gridTemplateColumns: '1fr'}}>
-                            <Input name={'ru-methods-str'} placeholder={'через запятую'} maxLength={40}/>
-                        </div>
-                        <Section>
-                            <Cell
-                                Component="label"
-                                after={<Switch
-                                    onChange={() => {
-                                        let x = document.getElementById('location')
-                                        if (x.style.display === 'block') {
-                                            x.style.display = 'none'
-                                        } else {
-                                            x.style.display = 'block'
-                                        }
-                                    }}
-                                />}
-                            >
-                                Наличные
-                            </Cell>
-                            <div style={{display: 'none'}} id={'location'}>
-                                <Input style={{}} name='location' placeholder={'локация'} maxLength={40}/>
-                            </div>
-                        </Section>
-
-                        <Section>
-                            <Textarea placeholder={'ваш комментарий'} name={'comment'} maxLength={140}/>
-                        </Section>
-                    </List>
-                </form>
-            </div>
+                            <Section header={'Комментарий'}>
+                                <Textarea placeholder={'макс. 140 символов'} name={'comment'} maxLength={140}
+                                          value={fields.comment}
+                                          onChange={e => setFields({...fields, comment: e.target.value})}/>
+                            </Section>
+                        </List>
+                    </form>
+                </div>}
         </AppRoot>
     )
 }

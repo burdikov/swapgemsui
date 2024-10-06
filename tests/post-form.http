@@ -1,0 +1,9 @@
+### GET request to example server
+POST http://localhost:8443/bot/form
+Content-Type: application/x-www-form-urlencoded
+
+buy_or_sell = buy &
+our_sum = 33.4 &
+our_curr = EUR
+
+###

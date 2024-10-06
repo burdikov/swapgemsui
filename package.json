@@ -2,7 +2,7 @@
   "name": "react-intro",
   "version": "0.1.0",
   "private": true,
-  "homepage": "/form",
+  "homepage": "/",
   "dependencies": {
     "@telegram-apps/telegram-ui": "^2.1.7",
     "@testing-library/jest-dom": "^5.17.0",

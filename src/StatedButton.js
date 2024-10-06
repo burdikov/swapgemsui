@@ -1,23 +1,25 @@
-import {Button} from "@telegram-apps/telegram-ui";
-import {useState} from "react";
+import {HapticButton} from "./Haptics";
 
+const divStyle = {paddingRight: '1px', paddingLeft: '1px'}
 
-export default function StatedButton({formName: fieldName, formValue, f, ...args}) {
-    const [pressedState, setPressedState] = useState(false)
+export default function StatedButton(
+    {
+        state,
+        pressed,
+        onPress,
+        onDepress,
+        ...args
+    }
+) {
     return (
-        <div>
-            <input type={'checkbox'} checked={pressedState} style={{display: 'none'}}
-                   name={fieldName} value={formValue}
-            />
-            <Button
+        <div style={divStyle}>
+            <HapticButton
                 {...args}
-                mode={pressedState ? 'bezeled' : 'outline'}
+                mode={pressed ? 'filled' : 'plain'}
                 onClick={() => {
-                    // window.Telegram.WebApp.HapticFeedback.impactOccurred('soft')
-                    setPressedState((b) => !b)
-                    if (f) f()
+                    pressed ? onDepress(state) : onPress(state)
                 }}
-            ></Button>
+            />
         </div>
     )
 }
